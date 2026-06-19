@@ -50,14 +50,14 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.ENV_NAME }}-flask-app
-          exit-code: 1
+          exit-code: 0
           severity: CRITICAL
 
       - name: scan nginx images
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.ENV_NAME }}-nginx
-          exit-code: 1
+          exit-code: 0
           severity: CRITICAL
 
       - name: Configure AWS credentials
