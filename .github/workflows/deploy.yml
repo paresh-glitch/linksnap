@@ -1,0 +1,60 @@
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main, dev]
+
+env:
+  ECR_REGISTRY: 030635937630.dkr.ecr.ap-south-1.amazonaws.com
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    env:
+      ENV_NAME: ${{ github.event.workflow_run.head_branch == 'main' && 'prod' || 'dev' }}
+
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        role-to-assume: arn:aws:iam::030635937630:role/github-actions-role
+        aws-region: ap-south-1
+    
+    - name: download task def
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition ${{ env.ENV_NAME }}-linksnap-cluster-task \
+          --query taskDefinition > task-definition.json
+
+    - name: Update Flask image in task definition
+      id: flask-task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: task-definition.json
+        container-name: flask
+        image: ${{ env.ECR_REGISTRY }}/${{ env.ENV_NAME }}-flask-app:${{ github.event.workflow_run.head_sha }}
+
+      - name: Update Nginx image in task definition
+        id: nginx-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.flask-task-def.outputs.task-definition }}
+          container-name: nginx
+          image: ${{ env.ECR_REGISTRY }}/${{ env.ENV_NAME }}-nginx:${{ github.event.workflow_run.head_sha }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.nginx-task-def.outputs.task-definition }}
+          service: ${{ env.ENV_NAME }}-linksnap-cluster-service
+          cluster: ${{ env.ENV_NAME }}-linksnap-cluster
+          wait-for-service-stability: true
+
